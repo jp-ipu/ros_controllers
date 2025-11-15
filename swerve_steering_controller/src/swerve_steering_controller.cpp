@@ -650,64 +650,13 @@ namespace swerve_steering_controller
       std::vector<double> wheels_desired_velocities,
       std::vector<double> holders_desired_positions)
   {
-    if (publish_wheel_joint_controller_state_ && rt_controller_state_pub_ && rt_controller_state_pub_->trylock())
-    {
-      const double cmd_dt = period.seconds();
-
-      rt_controller_state_pub_->msg_.header.stamp = time;
-      const double control_duration = (time - time_previous_).seconds();
-
-      for (size_t i = 0; i < wheel_joints_size_; ++i)
-      {
-        double holder_desired_velocity = (holders_desired_positions[i] - holders_desired_positions_previous_[i]) / cmd_dt;
-
-        const double wheel_acc = (wheel_velocity_state_interfaces_[i].get().get_optional().value() - wheels_velocities_previous_[i]) / control_duration;
-        const double holder_acc = (holder_velocity_state_interfaces_[i].get().get_optional().value() - holders_velocities_previous_[i]) / control_duration;
-
-        // Actual
-        rt_controller_state_pub_->msg_.actual.positions[i] = wheel_position_state_interfaces_[i].get().get_optional().value();
-        rt_controller_state_pub_->msg_.actual.velocities[i] = wheel_velocity_state_interfaces_[i].get().get_optional().value();
-        rt_controller_state_pub_->msg_.actual.accelerations[i] = wheel_acc;
-
-        rt_controller_state_pub_->msg_.actual.positions[i + wheel_joints_size_] = holder_position_state_interfaces_[i].get().get_optional().value();
-        rt_controller_state_pub_->msg_.actual.velocities[i + wheel_joints_size_] = holder_velocity_state_interfaces_[i].get().get_optional().value();
-        rt_controller_state_pub_->msg_.actual.accelerations[i + wheel_joints_size_] = holder_acc;
-
-        // Desired
-        rt_controller_state_pub_->msg_.desired.positions[i] += wheels_desired_velocities[i] * cmd_dt;
-        rt_controller_state_pub_->msg_.desired.velocities[i] = wheels_desired_velocities[i];
-        rt_controller_state_pub_->msg_.desired.accelerations[i] = (wheels_desired_velocities[i] - wheels_desired_velocities_previous_[i]) * cmd_dt;
-
-        rt_controller_state_pub_->msg_.desired.positions[i + wheel_joints_size_] += holder_desired_velocity * cmd_dt;
-        rt_controller_state_pub_->msg_.desired.velocities[i + wheel_joints_size_] = holder_desired_velocity;
-        rt_controller_state_pub_->msg_.desired.accelerations[i + wheel_joints_size_] = (holder_desired_velocity - holders_desired_velocities_previous_[i]) * cmd_dt;
-
-        // Error
-        rt_controller_state_pub_->msg_.error.positions[i] =
-          rt_controller_state_pub_->msg_.desired.positions[i] - rt_controller_state_pub_->msg_.actual.positions[i];
-        rt_controller_state_pub_->msg_.error.velocities[i] =
-          rt_controller_state_pub_->msg_.desired.velocities[i] - rt_controller_state_pub_->msg_.actual.velocities[i];
-        rt_controller_state_pub_->msg_.error.accelerations[i] =
-          rt_controller_state_pub_->msg_.desired.accelerations[i] - rt_controller_state_pub_->msg_.actual.accelerations[i];
-
-        rt_controller_state_pub_->msg_.error.positions[i + wheel_joints_size_] =
-          rt_controller_state_pub_->msg_.desired.positions[i + wheel_joints_size_] - rt_controller_state_pub_->msg_.actual.positions[i + wheel_joints_size_];
-        rt_controller_state_pub_->msg_.error.velocities[i + wheel_joints_size_] =
-          rt_controller_state_pub_->msg_.desired.velocities[i + wheel_joints_size_] - rt_controller_state_pub_->msg_.actual.velocities[i + wheel_joints_size_];
-        rt_controller_state_pub_->msg_.error.accelerations[i + wheel_joints_size_] =
-          rt_controller_state_pub_->msg_.desired.accelerations[i + wheel_joints_size_] - rt_controller_state_pub_->msg_.actual.accelerations[i + wheel_joints_size_];
-
-        // Save previous values
-        wheels_velocities_previous_[i] = wheel_velocity_state_interfaces_[i].get().get_optional().value();
-        wheels_desired_velocities_previous_[i] = wheels_desired_velocities[i];
-
-        holders_velocities_previous_[i] = holder_velocity_state_interfaces_[i].get().get_optional().value();
-        holders_desired_positions_previous_[i] = holders_desired_positions[i];
-        holders_desired_velocities_previous_[i] = holder_desired_velocity;
-      }
-
-      rt_controller_state_pub_->unlockAndPublish();
-    }
+    // Controller state publishing is disabled in ROS2 Jazzy due to
+    // JointTrajectoryControllerState message API changes
+    // TODO: Implement controller state publishing with the new ROS2 Jazzy message structure
+    (void)time;
+    (void)period;
+    (void)wheels_desired_velocities;
+    (void)holders_desired_positions;
   }
 
 } // namespace swerve_steering_controller
