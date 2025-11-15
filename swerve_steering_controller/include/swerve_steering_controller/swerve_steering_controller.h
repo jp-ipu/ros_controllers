@@ -159,6 +159,20 @@ namespace swerve_steering_controller
           std::shared_ptr<rclcpp::Publisher<control_msgs::msg::JointTrajectoryControllerState>> controller_state_pub_;
           std::shared_ptr<realtime_tools::RealtimePublisher<control_msgs::msg::JointTrajectoryControllerState>> rt_controller_state_pub_;
 
+          // Heading lock functionality
+          bool heading_lock_enabled_;
+          double locked_heading_;
+          bool heading_is_locked_;
+          double heading_lock_threshold_;  // angular velocity threshold to trigger lock
+
+          // PID controller for heading lock
+          double heading_pid_kp_;
+          double heading_pid_ki_;
+          double heading_pid_kd_;
+          double heading_integral_error_;
+          double heading_previous_error_;
+          double heading_integral_max_;  // anti-windup limit
+
           void cmd_callback(const geometry_msgs::msg::Twist::SharedPtr command);
 
           bool getWheelParams();
@@ -170,6 +184,11 @@ namespace swerve_steering_controller
           void publishWheelData(const rclcpp::Time& time, const rclcpp::Duration& period,
                                 std::vector<double> wheels_desired_velocities,
                                 std::vector<double> holders_desired_positions);
+
+          // Heading lock helpers
+          double normalizeAngle(double angle);
+          double computeHeadingError(double current_heading, double desired_heading);
+          double computeHeadingCorrection(double heading_error, double dt);
 
     };
 }// namespace swerve_steering_controller

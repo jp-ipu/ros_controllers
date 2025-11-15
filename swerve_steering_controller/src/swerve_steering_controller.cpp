@@ -135,6 +135,14 @@ namespace swerve_steering_controller
       auto_declare<double>("angular.z.max_acceleration", 0.0);
       auto_declare<double>("angular.z.min_acceleration", 0.0);
 
+      // Heading lock parameters
+      auto_declare<bool>("heading_lock.enabled", false);
+      auto_declare<double>("heading_lock.threshold", 0.01);  // rad/s threshold to trigger lock
+      auto_declare<double>("heading_lock.pid.kp", 1.0);
+      auto_declare<double>("heading_lock.pid.ki", 0.0);
+      auto_declare<double>("heading_lock.pid.kd", 0.0);
+      auto_declare<double>("heading_lock.pid.integral_max", 1.0);  // Anti-windup limit
+
       // Odometry covariance
       auto_declare<std::vector<double>>("pose_covariance_diagonal",
         std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
@@ -216,6 +224,18 @@ namespace swerve_steering_controller
 
     infinity_tol_ = node->get_parameter("infinity_tolerance").as_double();
     intersection_tol_ = node->get_parameter("intersection_tolerance").as_double();
+
+    // Configure heading lock
+    heading_lock_enabled_ = node->get_parameter("heading_lock.enabled").as_bool();
+    heading_lock_threshold_ = node->get_parameter("heading_lock.threshold").as_double();
+    heading_pid_kp_ = node->get_parameter("heading_lock.pid.kp").as_double();
+    heading_pid_ki_ = node->get_parameter("heading_lock.pid.ki").as_double();
+    heading_pid_kd_ = node->get_parameter("heading_lock.pid.kd").as_double();
+    heading_integral_max_ = node->get_parameter("heading_lock.pid.integral_max").as_double();
+    heading_is_locked_ = false;
+    heading_integral_error_ = 0.0;
+    heading_previous_error_ = 0.0;
+    locked_heading_ = 0.0;
 
     // Setup publishers
     setOdomPubFields();
@@ -441,6 +461,47 @@ namespace swerve_steering_controller
 
     // Get current velocity command
     utils::command current_cmd = *(commands_buffer_.readFromRT());
+
+    // Apply heading lock if enabled
+    if (heading_lock_enabled_)
+    {
+      const double current_heading = odometry_.getHeading();
+
+      // Check if we should lock or unlock the heading
+      if (std::abs(current_cmd.w) < heading_lock_threshold_)
+      {
+        // Angular velocity below threshold - lock the heading
+        if (!heading_is_locked_)
+        {
+          // First time locking - capture current heading
+          locked_heading_ = current_heading;
+          heading_is_locked_ = true;
+          heading_integral_error_ = 0.0;  // Reset integral term
+          heading_previous_error_ = 0.0;  // Reset derivative term
+
+          RCLCPP_DEBUG(node->get_logger(), "Heading locked at %.3f rad", locked_heading_);
+        }
+      }
+      else
+      {
+        // Angular velocity above threshold - unlock the heading
+        if (heading_is_locked_)
+        {
+          heading_is_locked_ = false;
+          RCLCPP_DEBUG(node->get_logger(), "Heading unlocked");
+        }
+      }
+
+      // If heading is locked, compute correction using PID
+      if (heading_is_locked_)
+      {
+        const double heading_error = computeHeadingError(current_heading, locked_heading_);
+        const double correction = computeHeadingCorrection(heading_error, period.seconds());
+
+        // Override angular velocity with PID correction
+        current_cmd.w = correction;
+      }
+    }
 
     // Limit velocities and accelerations
     const double cmd_dt = period.seconds();
@@ -720,6 +781,44 @@ namespace swerve_steering_controller
 
       rt_controller_state_pub_->unlockAndPublish();
     }
+  }
+
+  double SwerveSteeringController::normalizeAngle(double angle)
+  {
+    // Normalize angle to [-pi, pi]
+    while (angle > M_PI) angle -= 2.0 * M_PI;
+    while (angle < -M_PI) angle += 2.0 * M_PI;
+    return angle;
+  }
+
+  double SwerveSteeringController::computeHeadingError(double current_heading, double desired_heading)
+  {
+    // Compute the shortest angular difference between current and desired heading
+    double error = desired_heading - current_heading;
+    return normalizeAngle(error);
+  }
+
+  double SwerveSteeringController::computeHeadingCorrection(double heading_error, double dt)
+  {
+    // PID controller for heading correction
+    // Proportional term
+    double p_term = heading_pid_kp_ * heading_error;
+
+    // Integral term with anti-windup
+    heading_integral_error_ += heading_error * dt;
+    heading_integral_error_ = std::clamp(heading_integral_error_, -heading_integral_max_, heading_integral_max_);
+    double i_term = heading_pid_ki_ * heading_integral_error_;
+
+    // Derivative term
+    double d_term = 0.0;
+    if (dt > 0.0)
+    {
+      d_term = heading_pid_kd_ * (heading_error - heading_previous_error_) / dt;
+    }
+
+    heading_previous_error_ = heading_error;
+
+    return p_term + i_term + d_term;
   }
 
 } // namespace swerve_steering_controller
