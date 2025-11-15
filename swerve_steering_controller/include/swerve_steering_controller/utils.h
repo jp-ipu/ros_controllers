@@ -36,14 +36,14 @@
  * Author: Mark Naeem
  */
 
+#pragma once
+
 #include <vector>
 #include <array>
 #include <algorithm>
 #include <cmath>
 
-#include <ros/ros.h>
-
-#pragma once
+#include <rclcpp/time.hpp>
 
 struct utils
 {
@@ -61,9 +61,9 @@ struct utils
       double y;
       double w;
 
-      ros::Time stamp;
+      rclcpp::Time stamp;
 
-      command() :x (0.0),y(0.0), w(0.0), stamp(0.0) {}
+      command() :x (0.0), y(0.0), w(0.0), stamp(0, 0, RCL_ROS_TIME) {}
     };
 
 

@@ -40,7 +40,7 @@
 
 #include <swerve_steering_controller/utils.h>
 #include <numeric>
-#include <ros/time.h>
+#include <rclcpp/time.hpp>
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics/stats.hpp>
 #include <boost/accumulators/statistics/rolling_mean.hpp>
@@ -59,9 +59,9 @@ namespace swerve_steering_controller
 
         Odometry(size_t velocity_rolling_window_size = 10);
 
-        void init(const ros::Time &time, double infinity_tolerance, double intersection_tolerance);
+        void init(const rclcpp::Time &time, double infinity_tolerance, double intersection_tolerance);
 
-        bool update(std::vector<double> wheels_omega, std::vector<double> holders_theta, std::vector<int> directions, const ros::Time &time, std::array<double,2>* intersection_point);
+        bool update(std::vector<double> wheels_omega, std::vector<double> holders_theta, std::vector<int> directions, const rclcpp::Time &time, std::array<double,2>* intersection_point);
 
         double getHeading() const
         {
@@ -110,7 +110,7 @@ namespace swerve_steering_controller
         void resetAccumulators();
 
         /// Current timestamp:
-        ros::Time timestamp_;
+        rclcpp::Time timestamp_;
 
         size_t wheels_num_;
 

@@ -1,9 +1,10 @@
-<library path="lib/libswerve_steering_controller">
-
-  <class name="swerve_steering_controller/SwerveSteeringController" type="swerve_steering_controller::SwerveSteeringController" base_class_type="controller_interface::ControllerBase">
+<library path="swerve_steering_controller">
+  <class name="swerve_steering_controller/SwerveSteeringController"
+         type="swerve_steering_controller::SwerveSteeringController"
+         base_class_type="controller_interface::ControllerInterface">
     <description>
-      The SwerveSteeringController tracks velocity commands. It expects n VelocityJointInterface type and n PositionJointInterface type of hardware interfaces.
+      The SwerveSteeringController tracks velocity commands for swerve/omnidirectional drive mobile bases.
+      It expects velocity command interfaces for the wheel joints and position command interfaces for the steering joints.
     </description>
   </class>
-
 </library>

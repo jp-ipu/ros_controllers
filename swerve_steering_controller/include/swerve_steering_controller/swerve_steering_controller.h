@@ -36,65 +36,79 @@
  * Author: Mark Naeem
  */
 
-#include <controller_interface/multi_interface_controller.h>
+#pragma once
 
-#include <control_msgs/JointTrajectoryControllerState.h>
-#include <hardware_interface/joint_command_interface.h>
+#include <controller_interface/controller_interface.hpp>
+#include <controller_interface/helpers.hpp>
+
+#include <control_msgs/msg/joint_trajectory_controller_state.hpp>
+#include <geometry_msgs/msg/twist.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
+#include <geometry_msgs/msg/point.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <tf2_msgs/msg/tf_message.hpp>
+
+#include <rclcpp/rclcpp.hpp>
+#include <rclcpp_lifecycle/state.hpp>
 #include <realtime_tools/realtime_buffer.h>
 #include <realtime_tools/realtime_publisher.h>
-#include <geometry_msgs/Twist.h>
-#include <geometry_msgs/Point.h>
-
-#include <nav_msgs/Odometry.h>
-#include <tf/tfMessage.h>
-#include <tf/tf.h>
 
 #include <vector>
 #include <cmath>
+#include <memory>
+#include <string>
 
 #include <swerve_steering_controller/utils.h>
 #include <swerve_steering_controller/odometry.h>
 #include <swerve_steering_controller/wheel.h>
 #include <swerve_steering_controller/speed_limiter.h>
 
-
 namespace swerve_steering_controller
 {
-    class SwerveSteeringController
-          : public controller_interface::MultiInterfaceController<hardware_interface::VelocityJointInterface, hardware_interface::PositionJointInterface>
+    class SwerveSteeringController : public controller_interface::ControllerInterface
   {
-      public: 
+      public:
           SwerveSteeringController();
 
-          bool init(hardware_interface::RobotHW* robot_hw,
-                    ros::NodeHandle& root_nh,
-                    ros::NodeHandle& controller_nh);
+          controller_interface::InterfaceConfiguration command_interface_configuration() const override;
 
+          controller_interface::InterfaceConfiguration state_interface_configuration() const override;
 
-          void update(const ros::Time& time, const ros::Duration& period);
+          controller_interface::CallbackReturn on_init() override;
 
-          void starting(const ros::Time& time);
+          controller_interface::CallbackReturn on_configure(
+              const rclcpp_lifecycle::State & previous_state) override;
 
-          void stopping(const ros::Time& time);
+          controller_interface::CallbackReturn on_activate(
+              const rclcpp_lifecycle::State & previous_state) override;
+
+          controller_interface::CallbackReturn on_deactivate(
+              const rclcpp_lifecycle::State & previous_state) override;
+
+          controller_interface::return_type update(
+              const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
       private:
-          std::string name_;
-
           std::string base_frame_id_;
           std::string odom_frame_id_;
 
-          ros::Duration publish_period_;
-          ros::Time last_state_publish_time_;
+          rclcpp::Duration publish_period_{0, 0};
+          rclcpp::Time last_state_publish_time_{0, 0, RCL_ROS_TIME};
 
-          std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::Odometry> > odom_publisher_;
-          std::shared_ptr<realtime_tools::RealtimePublisher<tf::tfMessage> > tf_odom_publisher_;
-          std::shared_ptr<realtime_tools::RealtimePublisher<geometry_msgs::Point> > avg_intersection_publisher_;
+          std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::Odometry>> odom_publisher_;
+          std::shared_ptr<realtime_tools::RealtimePublisher<nav_msgs::msg::Odometry>> rt_odom_publisher_;
+
+          std::shared_ptr<rclcpp::Publisher<tf2_msgs::msg::TFMessage>> tf_odom_publisher_;
+          std::shared_ptr<realtime_tools::RealtimePublisher<tf2_msgs::msg::TFMessage>> rt_tf_odom_publisher_;
+
+          std::shared_ptr<rclcpp::Publisher<geometry_msgs::msg::Point>> avg_intersection_publisher_;
+          std::shared_ptr<realtime_tools::RealtimePublisher<geometry_msgs::msg::Point>> rt_avg_intersection_publisher_;
 
           Odometry odometry_;
-          
+
           double infinity_tol_;
           double intersection_tol_;
-          
+
           /// Speed limiters:
           utils::command last1_cmd_;
           utils::command last0_cmd_;
@@ -102,10 +116,8 @@ namespace swerve_steering_controller
           SpeedLimiter limiter_lin_y_;
           SpeedLimiter limiter_ang_;
 
-
-
           /// Previous time and velocities from the encoders:
-          ros::Time time_previous_;
+          rclcpp::Time time_previous_{0, 0, RCL_ROS_TIME};
           std::vector<double> wheels_velocities_previous_;
           std::vector<double> holders_velocities_previous_;
 
@@ -119,29 +131,45 @@ namespace swerve_steering_controller
           size_t wheel_joints_size_;
 
           std::vector<wheel> wheels_;
-          std::vector<hardware_interface::JointHandle>  wheels_joints_handles_;
-          std::vector<hardware_interface::JointHandle> holders_joints_handles_;
+
+          // Command and state interface names
+          std::vector<std::string> wheel_joint_names_;
+          std::vector<std::string> holder_joint_names_;
+
+          // Command interfaces
+          std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>>
+              wheel_velocity_command_interfaces_;
+          std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>>
+              holder_position_command_interfaces_;
+
+          // State interfaces
+          std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
+              wheel_velocity_state_interfaces_;
+          std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
+              wheel_position_state_interfaces_;
+          std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
+              holder_position_state_interfaces_;
+          std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>>
+              holder_velocity_state_interfaces_;
 
           utils::command cmd_;
-          ros::Subscriber cmd_subscriber_;
+          rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_subscriber_;
           realtime_tools::RealtimeBuffer<utils::command> commands_buffer_;
 
-          std::shared_ptr<realtime_tools::RealtimePublisher<control_msgs::JointTrajectoryControllerState> > controller_state_pub_;
+          std::shared_ptr<rclcpp::Publisher<control_msgs::msg::JointTrajectoryControllerState>> controller_state_pub_;
+          std::shared_ptr<realtime_tools::RealtimePublisher<control_msgs::msg::JointTrajectoryControllerState>> rt_controller_state_pub_;
 
-          void cmd_callback(const geometry_msgs::Twist& command);
+          void cmd_callback(const geometry_msgs::msg::Twist::SharedPtr command);
 
-          bool getWheelParams(ros::NodeHandle& controller_nh, const std::string& wheel_param, const std::string& holder_param, std::vector<std::string>& wheel_names, std::vector<std::string>& holder_names);
-          bool getXmlStringList(ros::NodeHandle& node_handler, const std::string& list_param, std::vector<std::string>& returned_names);
+          bool getWheelParams();
 
-          void setOdomPubFields(ros::NodeHandle& root_nh, ros::NodeHandle& controller_nh);
-  
-          // Controller state publisher.. includes the whels and the holders 
-          std::shared_ptr<realtime_tools::RealtimePublisher<control_msgs::JointTrajectoryControllerState> > controller_state_publisher;
+          void setOdomPubFields();
 
           void set_to_initial_state();
 
-          void publishWheelData(const ros::Time& time, const ros::Duration& period, std::vector<double> wheels_desired_velocities, std::vector<double> holders_desired_positions);
-  
+          void publishWheelData(const rclcpp::Time& time, const rclcpp::Duration& period,
+                                std::vector<double> wheels_desired_velocities,
+                                std::vector<double> holders_desired_positions);
+
     };
 }// namespace swerve_steering_controller
-  
