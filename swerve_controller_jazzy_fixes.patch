@@ -1,0 +1,401 @@
+diff --git a/swerve_steering_controller/include/swerve_steering_controller/swerve_steering_controller.h b/swerve_steering_controller/include/swerve_steering_controller/swerve_steering_controller.h
+index 05ca2d1..5a03c09 100644
+--- a/swerve_steering_controller/include/swerve_steering_controller/swerve_steering_controller.h
++++ b/swerve_steering_controller/include/swerve_steering_controller/swerve_steering_controller.h
+@@ -50,8 +50,8 @@
+ 
+ #include <rclcpp/rclcpp.hpp>
+ #include <rclcpp_lifecycle/state.hpp>
+-#include <realtime_tools/realtime_buffer.h>
+-#include <realtime_tools/realtime_publisher.h>
++#include <realtime_tools/realtime_buffer.hpp>
++#include <realtime_tools/realtime_publisher.hpp>
+ 
+ #include <vector>
+ #include <cmath>
+@@ -159,6 +159,20 @@ namespace swerve_steering_controller
+           std::shared_ptr<rclcpp::Publisher<control_msgs::msg::JointTrajectoryControllerState>> controller_state_pub_;
+           std::shared_ptr<realtime_tools::RealtimePublisher<control_msgs::msg::JointTrajectoryControllerState>> rt_controller_state_pub_;
+ 
++          // Heading lock functionality
++          bool heading_lock_enabled_;
++          double locked_heading_;
++          bool heading_is_locked_;
++          double heading_lock_threshold_;  // angular velocity threshold to trigger lock
++
++          // PID controller for heading lock
++          double heading_pid_kp_;
++          double heading_pid_ki_;
++          double heading_pid_kd_;
++          double heading_integral_error_;
++          double heading_previous_error_;
++          double heading_integral_max_;  // anti-windup limit
++
+           void cmd_callback(const geometry_msgs::msg::Twist::SharedPtr command);
+ 
+           bool getWheelParams();
+@@ -171,5 +185,10 @@ namespace swerve_steering_controller
+                                 std::vector<double> wheels_desired_velocities,
+                                 std::vector<double> holders_desired_positions);
+ 
++          // Heading lock helpers
++          double normalizeAngle(double angle);
++          double computeHeadingError(double current_heading, double desired_heading);
++          double computeHeadingCorrection(double heading_error, double dt);
++
+     };
+ }// namespace swerve_steering_controller
+diff --git a/swerve_steering_controller/src/odometry.cpp b/swerve_steering_controller/src/odometry.cpp
+index 04d4589..ca16db0 100644
+--- a/swerve_steering_controller/src/odometry.cpp
++++ b/swerve_steering_controller/src/odometry.cpp
+@@ -136,7 +136,7 @@ namespace swerve_steering_controller
+     {
+       // ROS_INFO_STREAM("inf_all");
+       angular=0;
+-      for (int i=0; i<wheels_num_; ++i)
++      for (size_t i=0; i<wheels_num_; ++i)
+       {
+         linear_x_vh += ( wheels_omega[i]*wheels_radii_[i]*cos(holders_theta[i]) ) / wheels_num_;
+         linear_y_vh += ( wheels_omega[i]*wheels_radii_[i]*sin(holders_theta[i]) ) / wheels_num_;
+@@ -167,7 +167,7 @@ namespace swerve_steering_controller
+       // ROS_INFO_STREAM("average intersection: "<<average_intersection[0]<<" "<<average_intersection[1]);
+       intersection_point->at(0) = average_intersection[0]; //just to visualize it on rqt_plot through the publisher
+       intersection_point->at(1) = average_intersection[1]; //just to visualize it on rqt_plot through the publisher
+-      for (int i=0; i<wheels_num_; ++i)
++      for (size_t i=0; i<wheels_num_; ++i)
+       {
+         //ignore the wheel if the intersection is on its center of rotation
+         if (utils::isclose(average_intersection[0],wheels_positions_[i][0])&&utils::isclose(average_intersection[1],wheels_positions_[i][1]))
+@@ -175,7 +175,7 @@ namespace swerve_steering_controller
+           continue;
+         }
+         auto icr_wh = std::array<double,2>{wheels_positions_[i][0]-average_intersection[0] , wheels_positions_[i][1]-average_intersection[1]};
+-        if (isinf(icr_wh[0])||isinf(icr_wh[1]))
++        if (std::isinf(icr_wh[0])||std::isinf(icr_wh[1]))
+             RCLCPP_WARN(rclcpp::get_logger("swerve_odometry"), "icr_wh is inf");
+         if (utils::isclose(icr_wh[0],0)||utils::isclose(icr_wh[1],0))
+             RCLCPP_WARN(rclcpp::get_logger("swerve_odometry"), "icr_wh for wheel %d is zero. icr is just over it!", static_cast<int>(i));
+@@ -188,7 +188,7 @@ namespace swerve_steering_controller
+       linear_y_vh = -1 * average_intersection[0] * angular;
+     }
+ 
+-    if(isnan(linear_x_vh)||isnan(linear_y_vh)||isnan(angular))
++    if(std::isnan(linear_x_vh)||std::isnan(linear_y_vh)||std::isnan(angular))
+     {
+       RCLCPP_ERROR(rclcpp::get_logger("swerve_odometry"), "estimated vx,vy or wz is nan");
+       for (const auto& it: holders_theta)
+@@ -207,7 +207,7 @@ namespace swerve_steering_controller
+       RCLCPP_INFO(rclcpp::get_logger("swerve_odometry"), "linearx %f lineary %f angular %f", linear_x_vh, linear_y_vh, angular);
+       return false;
+     }
+-    if(isinf(linear_x_vh)||isinf(linear_y_vh)||isinf(angular))
++    if(std::isinf(linear_x_vh)||std::isinf(linear_y_vh)||std::isinf(angular))
+     {
+       RCLCPP_ERROR(rclcpp::get_logger("swerve_odometry"), "estimated vx,vy or wz is inf");
+       for (const auto& it: holders_theta)
+@@ -233,7 +233,7 @@ namespace swerve_steering_controller
+     linear_y = linear_x_vh * sin(heading_) + linear_y_vh * cos(heading_);
+ 
+     /// We cannot estimate the speed with very small time intervals:
+-    const double dt = (time - timestamp_).toSec();
++    const double dt = (time - timestamp_).seconds();
+     if (dt < 0.0001)
+       return false; // Interval too small to integrate with
+ 
+@@ -291,6 +291,7 @@ namespace swerve_steering_controller
+       const double heading_old = heading_;
+       const double rx = linear_x/angular;
+       const double ry = linear_y/angular;
++      (void)ry;  // Unused variable - potentially a bug in original code
+       heading_ += angular;
+       x_       +=  rx * (sin(heading_) - sin(heading_old));
+       y_       += -rx * (cos(heading_) - cos(heading_old));
+diff --git a/swerve_steering_controller/src/swerve_steering_controller.cpp b/swerve_steering_controller/src/swerve_steering_controller.cpp
+index c6d9999..f39dfd7 100755
+--- a/swerve_steering_controller/src/swerve_steering_controller.cpp
++++ b/swerve_steering_controller/src/swerve_steering_controller.cpp
+@@ -47,8 +47,8 @@ namespace swerve_steering_controller
+       base_frame_id_("base_link")
+     , odom_frame_id_("odom")
+     , enable_odom_tf_(true)
+-    , wheel_joints_size_(0)
+     , publish_wheel_joint_controller_state_(false)
++    , wheel_joints_size_(0)
+   {
+   }
+ 
+@@ -135,6 +135,14 @@ namespace swerve_steering_controller
+       auto_declare<double>("angular.z.max_acceleration", 0.0);
+       auto_declare<double>("angular.z.min_acceleration", 0.0);
+ 
++      // Heading lock parameters
++      auto_declare<bool>("heading_lock.enabled", false);
++      auto_declare<double>("heading_lock.threshold", 0.01);  // rad/s threshold to trigger lock
++      auto_declare<double>("heading_lock.pid.kp", 1.0);
++      auto_declare<double>("heading_lock.pid.ki", 0.0);
++      auto_declare<double>("heading_lock.pid.kd", 0.0);
++      auto_declare<double>("heading_lock.pid.integral_max", 1.0);  // Anti-windup limit
++
+       // Odometry covariance
+       auto_declare<std::vector<double>>("pose_covariance_diagonal",
+         std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
+@@ -217,6 +225,18 @@ namespace swerve_steering_controller
+     infinity_tol_ = node->get_parameter("infinity_tolerance").as_double();
+     intersection_tol_ = node->get_parameter("intersection_tolerance").as_double();
+ 
++    // Configure heading lock
++    heading_lock_enabled_ = node->get_parameter("heading_lock.enabled").as_bool();
++    heading_lock_threshold_ = node->get_parameter("heading_lock.threshold").as_double();
++    heading_pid_kp_ = node->get_parameter("heading_lock.pid.kp").as_double();
++    heading_pid_ki_ = node->get_parameter("heading_lock.pid.ki").as_double();
++    heading_pid_kd_ = node->get_parameter("heading_lock.pid.kd").as_double();
++    heading_integral_max_ = node->get_parameter("heading_lock.pid.integral_max").as_double();
++    heading_is_locked_ = false;
++    heading_integral_error_ = 0.0;
++    heading_previous_error_ = 0.0;
++    locked_heading_ = 0.0;
++
+     // Setup publishers
+     setOdomPubFields();
+ 
+@@ -383,8 +403,8 @@ namespace swerve_steering_controller
+ 
+     for (size_t i = 0; i < wheel_joints_size_; ++i)
+     {
+-      double wheel_vel = wheel_velocity_state_interfaces_[i].get().get_value();
+-      double holder_pos = holder_position_state_interfaces_[i].get().get_value();
++      double wheel_vel = wheel_velocity_state_interfaces_[i].get().get_optional().value();
++      double holder_pos = holder_position_state_interfaces_[i].get().get_optional().value();
+ 
+       wheels_omega.push_back(wheel_vel);
+       holders_theta.push_back(holder_pos);
+@@ -442,6 +462,47 @@ namespace swerve_steering_controller
+     // Get current velocity command
+     utils::command current_cmd = *(commands_buffer_.readFromRT());
+ 
++    // Apply heading lock if enabled
++    if (heading_lock_enabled_)
++    {
++      const double current_heading = odometry_.getHeading();
++
++      // Check if we should lock or unlock the heading
++      if (std::abs(current_cmd.w) < heading_lock_threshold_)
++      {
++        // Angular velocity below threshold - lock the heading
++        if (!heading_is_locked_)
++        {
++          // First time locking - capture current heading
++          locked_heading_ = current_heading;
++          heading_is_locked_ = true;
++          heading_integral_error_ = 0.0;  // Reset integral term
++          heading_previous_error_ = 0.0;  // Reset derivative term
++
++          RCLCPP_DEBUG(node->get_logger(), "Heading locked at %.3f rad", locked_heading_);
++        }
++      }
++      else
++      {
++        // Angular velocity above threshold - unlock the heading
++        if (heading_is_locked_)
++        {
++          heading_is_locked_ = false;
++          RCLCPP_DEBUG(node->get_logger(), "Heading unlocked");
++        }
++      }
++
++      // If heading is locked, compute correction using PID
++      if (heading_is_locked_)
++      {
++        const double heading_error = computeHeadingError(current_heading, locked_heading_);
++        const double correction = computeHeadingCorrection(heading_error, period.seconds());
++
++        // Override angular velocity with PID correction
++        current_cmd.w = correction;
++      }
++    }
++
+     // Limit velocities and accelerations
+     const double cmd_dt = period.seconds();
+ 
+@@ -458,16 +519,16 @@ namespace swerve_steering_controller
+     for (size_t i = 0; i < wheel_joints_size_; ++i)
+     {
+       double wheel_vx = current_cmd.x - current_cmd.w * wheels_[i].position[1] -
+-                        wheels_[i].offset * cos(holder_position_state_interfaces_[i].get().get_value());
++                        wheels_[i].offset * cos(holder_position_state_interfaces_[i].get().get_optional().value());
+       double wheel_vy = current_cmd.y + current_cmd.w * wheels_[i].position[0] +
+-                        wheels_[i].offset * sin(holder_position_state_interfaces_[i].get().get_value());
++                        wheels_[i].offset * sin(holder_position_state_interfaces_[i].get().get_optional().value());
+ 
+       // Calculate required wheel speed and steering angle
+       double w_w = sqrt(pow(wheel_vx, 2) + pow(wheel_vy, 2)) / wheels_[i].radius;
+       double w_th = atan2(wheel_vy, wheel_vx);
+ 
+       // Process command through wheel class
+-      wheels_[i].set_current_angle(holder_position_state_interfaces_[i].get().get_value());
++      wheels_[i].set_current_angle(holder_position_state_interfaces_[i].get().get_optional().value());
+       wheels_[i].set_command_velocity(w_w);
+       wheels_[i].set_command_angle(w_th);
+ 
+@@ -482,8 +543,16 @@ namespace swerve_steering_controller
+       }
+ 
+       // Set commands
+-      wheel_velocity_command_interfaces_[i].get().set_value(w_applied);
+-      holder_position_command_interfaces_[i].get().set_value(th_applied);
++      if (!wheel_velocity_command_interfaces_[i].get().set_value(w_applied))
++      {
++        RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
++                             "Failed to set velocity command for wheel %zu", i);
++      }
++      if (!holder_position_command_interfaces_[i].get().set_value(th_applied))
++      {
++        RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
++                             "Failed to set position command for holder %zu", i);
++      }
+     }
+ 
+     publishWheelData(time, period, desired_velocities, desired_positions);
+@@ -620,31 +689,11 @@ namespace swerve_steering_controller
+     // Create controller state publisher if requested
+     if (publish_wheel_joint_controller_state_)
+     {
+-      controller_state_pub_ = node->create_publisher<control_msgs::msg::JointTrajectoryControllerState>(
+-        "~/wheel_joint_controller_state", 10);
+-      rt_controller_state_pub_ = std::make_shared<realtime_tools::RealtimePublisher<control_msgs::msg::JointTrajectoryControllerState>>(
+-        controller_state_pub_);
+-
+-      const size_t num_joints = wheel_joints_size_ * 2;
+-      rt_controller_state_pub_->msg_.joint_names.resize(num_joints);
+-      rt_controller_state_pub_->msg_.desired.positions.resize(num_joints);
+-      rt_controller_state_pub_->msg_.desired.velocities.resize(num_joints);
+-      rt_controller_state_pub_->msg_.desired.accelerations.resize(num_joints);
+-      rt_controller_state_pub_->msg_.desired.effort.resize(num_joints);
+-      rt_controller_state_pub_->msg_.actual.positions.resize(num_joints);
+-      rt_controller_state_pub_->msg_.actual.velocities.resize(num_joints);
+-      rt_controller_state_pub_->msg_.actual.accelerations.resize(num_joints);
+-      rt_controller_state_pub_->msg_.actual.effort.resize(num_joints);
+-      rt_controller_state_pub_->msg_.error.positions.resize(num_joints);
+-      rt_controller_state_pub_->msg_.error.velocities.resize(num_joints);
+-      rt_controller_state_pub_->msg_.error.accelerations.resize(num_joints);
+-      rt_controller_state_pub_->msg_.error.effort.resize(num_joints);
+-
+-      for (size_t i = 0; i < wheel_joints_size_; ++i)
+-      {
+-        rt_controller_state_pub_->msg_.joint_names[i] = wheel_joint_names_[i];
+-        rt_controller_state_pub_->msg_.joint_names[i + wheel_joints_size_] = holder_joint_names_[i];
+-      }
++      RCLCPP_WARN(node->get_logger(),
++                  "Controller state publishing is not yet implemented for ROS2 Jazzy due to "
++                  "JointTrajectoryControllerState message API changes. Disabling this feature.");
++      publish_wheel_joint_controller_state_ = false;
++      // TODO: Implement controller state publishing with the new ROS2 Jazzy message structure
+     }
+   }
+ 
+@@ -652,8 +701,8 @@ namespace swerve_steering_controller
+   {
+     for (size_t i = 0; i < wheel_joints_size_; ++i)
+     {
+-      wheel_velocity_command_interfaces_[i].get().set_value(0.0);
+-      holder_position_command_interfaces_[i].get().set_value(0.0);
++      (void)wheel_velocity_command_interfaces_[i].get().set_value(0.0);
++      (void)holder_position_command_interfaces_[i].get().set_value(0.0);
+     }
+   }
+ 
+@@ -673,16 +722,16 @@ namespace swerve_steering_controller
+       {
+         double holder_desired_velocity = (holders_desired_positions[i] - holders_desired_positions_previous_[i]) / cmd_dt;
+ 
+-        const double wheel_acc = (wheel_velocity_state_interfaces_[i].get().get_value() - wheels_velocities_previous_[i]) / control_duration;
+-        const double holder_acc = (holder_velocity_state_interfaces_[i].get().get_value() - holders_velocities_previous_[i]) / control_duration;
++        const double wheel_acc = (wheel_velocity_state_interfaces_[i].get().get_optional().value() - wheels_velocities_previous_[i]) / control_duration;
++        const double holder_acc = (holder_velocity_state_interfaces_[i].get().get_optional().value() - holders_velocities_previous_[i]) / control_duration;
+ 
+         // Actual
+-        rt_controller_state_pub_->msg_.actual.positions[i] = wheel_position_state_interfaces_[i].get().get_value();
+-        rt_controller_state_pub_->msg_.actual.velocities[i] = wheel_velocity_state_interfaces_[i].get().get_value();
++        rt_controller_state_pub_->msg_.actual.positions[i] = wheel_position_state_interfaces_[i].get().get_optional().value();
++        rt_controller_state_pub_->msg_.actual.velocities[i] = wheel_velocity_state_interfaces_[i].get().get_optional().value();
+         rt_controller_state_pub_->msg_.actual.accelerations[i] = wheel_acc;
+ 
+-        rt_controller_state_pub_->msg_.actual.positions[i + wheel_joints_size_] = holder_position_state_interfaces_[i].get().get_value();
+-        rt_controller_state_pub_->msg_.actual.velocities[i + wheel_joints_size_] = holder_velocity_state_interfaces_[i].get().get_value();
++        rt_controller_state_pub_->msg_.actual.positions[i + wheel_joints_size_] = holder_position_state_interfaces_[i].get().get_optional().value();
++        rt_controller_state_pub_->msg_.actual.velocities[i + wheel_joints_size_] = holder_velocity_state_interfaces_[i].get().get_optional().value();
+         rt_controller_state_pub_->msg_.actual.accelerations[i + wheel_joints_size_] = holder_acc;
+ 
+         // Desired
+@@ -710,10 +759,10 @@ namespace swerve_steering_controller
+           rt_controller_state_pub_->msg_.desired.accelerations[i + wheel_joints_size_] - rt_controller_state_pub_->msg_.actual.accelerations[i + wheel_joints_size_];
+ 
+         // Save previous values
+-        wheels_velocities_previous_[i] = wheel_velocity_state_interfaces_[i].get().get_value();
++        wheels_velocities_previous_[i] = wheel_velocity_state_interfaces_[i].get().get_optional().value();
+         wheels_desired_velocities_previous_[i] = wheels_desired_velocities[i];
+ 
+-        holders_velocities_previous_[i] = holder_velocity_state_interfaces_[i].get().get_value();
++        holders_velocities_previous_[i] = holder_velocity_state_interfaces_[i].get().get_optional().value();
+         holders_desired_positions_previous_[i] = holders_desired_positions[i];
+         holders_desired_velocities_previous_[i] = holder_desired_velocity;
+       }
+@@ -722,6 +771,44 @@ namespace swerve_steering_controller
+     }
+   }
+ 
++  double SwerveSteeringController::normalizeAngle(double angle)
++  {
++    // Normalize angle to [-pi, pi]
++    while (angle > M_PI) angle -= 2.0 * M_PI;
++    while (angle < -M_PI) angle += 2.0 * M_PI;
++    return angle;
++  }
++
++  double SwerveSteeringController::computeHeadingError(double current_heading, double desired_heading)
++  {
++    // Compute the shortest angular difference between current and desired heading
++    double error = desired_heading - current_heading;
++    return normalizeAngle(error);
++  }
++
++  double SwerveSteeringController::computeHeadingCorrection(double heading_error, double dt)
++  {
++    // PID controller for heading correction
++    // Proportional term
++    double p_term = heading_pid_kp_ * heading_error;
++
++    // Integral term with anti-windup
++    heading_integral_error_ += heading_error * dt;
++    heading_integral_error_ = std::clamp(heading_integral_error_, -heading_integral_max_, heading_integral_max_);
++    double i_term = heading_pid_ki_ * heading_integral_error_;
++
++    // Derivative term
++    double d_term = 0.0;
++    if (dt > 0.0)
++    {
++      d_term = heading_pid_kd_ * (heading_error - heading_previous_error_) / dt;
++    }
++
++    heading_previous_error_ = heading_error;
++
++    return p_term + i_term + d_term;
++  }
++
+ } // namespace swerve_steering_controller
+ 
+ PLUGINLIB_EXPORT_CLASS(swerve_steering_controller::SwerveSteeringController, controller_interface::ControllerInterface)
+diff --git a/swerve_steering_controller/src/wheel.cpp b/swerve_steering_controller/src/wheel.cpp
+index 4fbe3d9..a25cd74 100644
+--- a/swerve_steering_controller/src/wheel.cpp
++++ b/swerve_steering_controller/src/wheel.cpp
+@@ -39,7 +39,7 @@
+ #include <swerve_steering_controller/wheel.h>
+ 
+ wheel::wheel(const double radius, const std::array<double,2>& position, bool limitless, const std::array<double,2>& rotation_limits)
+-:radius{radius}, limitless_{limitless}, limits_{interval(rotation_limits,"close").complement()} 
++:limitless_{limitless}, limits_{interval(rotation_limits,"close").complement()}, radius{radius}
+ {
+     this -> position = std::move(position);
+ }
