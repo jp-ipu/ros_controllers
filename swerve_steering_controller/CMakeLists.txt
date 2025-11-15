@@ -6,7 +6,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
 endif()
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find dependencies
@@ -20,7 +20,6 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(realtime_tools REQUIRED)
-find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -50,7 +49,6 @@ ament_target_dependencies(${PROJECT_NAME}
   rclcpp
   rclcpp_lifecycle
   realtime_tools
-  std_srvs
   tf2
   tf2_msgs
   tf2_geometry_msgs
@@ -92,7 +90,6 @@ ament_export_dependencies(
   rclcpp
   rclcpp_lifecycle
   realtime_tools
-  std_srvs
   tf2
   tf2_msgs
   tf2_geometry_msgs

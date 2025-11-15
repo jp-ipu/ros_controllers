@@ -99,9 +99,9 @@ namespace swerve_steering_controller
       auto_declare<std::vector<std::string>>("wheels", std::vector<std::string>());
       auto_declare<std::vector<std::string>>("holders", std::vector<std::string>());
       auto_declare<std::vector<double>>("radii", std::vector<double>());
-      auto_declare<std::vector<std::vector<double>>>("positions", std::vector<std::vector<double>>());
+      auto_declare<std::vector<double>>("positions", std::vector<double>());  // Flattened 2D array
       auto_declare<std::vector<bool>>("limitless", std::vector<bool>());
-      auto_declare<std::vector<std::vector<double>>>("limits", std::vector<std::vector<double>>());
+      auto_declare<std::vector<double>>("limits", std::vector<double>());  // Flattened 2D array
       auto_declare<std::vector<double>>("offsets", std::vector<double>());
 
       auto_declare<std::string>("base_frame_id", base_frame_id_);
@@ -286,14 +286,37 @@ namespace swerve_steering_controller
 
     for (size_t i = 0; i < wheel_joints_size_; ++i)
     {
+      // Wheel velocity state is REQUIRED for odometry
       auto it = std::find_if(
         state_interfaces_.begin(), state_interfaces_.end(),
         [this, i](const auto & interface) {
           return interface.get_prefix_name() == wheel_joint_names_[i] &&
                  interface.get_interface_name() == hardware_interface::HW_IF_VELOCITY;
         });
-      if (it != state_interfaces_.end()) wheel_velocity_state_interfaces_.emplace_back(*it);
+      if (it == state_interfaces_.end())
+      {
+        RCLCPP_ERROR(node->get_logger(), "Could not find velocity state interface for wheel %s",
+                     wheel_joint_names_[i].c_str());
+        return controller_interface::CallbackReturn::ERROR;
+      }
+      wheel_velocity_state_interfaces_.emplace_back(*it);
 
+      // Holder position state is REQUIRED for odometry and control
+      it = std::find_if(
+        state_interfaces_.begin(), state_interfaces_.end(),
+        [this, i](const auto & interface) {
+          return interface.get_prefix_name() == holder_joint_names_[i] &&
+                 interface.get_interface_name() == hardware_interface::HW_IF_POSITION;
+        });
+      if (it == state_interfaces_.end())
+      {
+        RCLCPP_ERROR(node->get_logger(), "Could not find position state interface for holder %s",
+                     holder_joint_names_[i].c_str());
+        return controller_interface::CallbackReturn::ERROR;
+      }
+      holder_position_state_interfaces_.emplace_back(*it);
+
+      // Wheel position state is OPTIONAL (only needed for controller state publishing)
       it = std::find_if(
         state_interfaces_.begin(), state_interfaces_.end(),
         [this, i](const auto & interface) {
@@ -302,14 +325,7 @@ namespace swerve_steering_controller
         });
       if (it != state_interfaces_.end()) wheel_position_state_interfaces_.emplace_back(*it);
 
-      it = std::find_if(
-        state_interfaces_.begin(), state_interfaces_.end(),
-        [this, i](const auto & interface) {
-          return interface.get_prefix_name() == holder_joint_names_[i] &&
-                 interface.get_interface_name() == hardware_interface::HW_IF_POSITION;
-        });
-      if (it != state_interfaces_.end()) holder_position_state_interfaces_.emplace_back(*it);
-
+      // Holder velocity state is OPTIONAL (only needed for controller state publishing)
       it = std::find_if(
         state_interfaces_.begin(), state_interfaces_.end(),
         [this, i](const auto & interface) {
@@ -317,6 +333,19 @@ namespace swerve_steering_controller
                  interface.get_interface_name() == hardware_interface::HW_IF_VELOCITY;
         });
       if (it != state_interfaces_.end()) holder_velocity_state_interfaces_.emplace_back(*it);
+    }
+
+    // Validate we have the optional interfaces if controller state publishing is enabled
+    if (publish_wheel_joint_controller_state_)
+    {
+      if (wheel_position_state_interfaces_.size() != wheel_joints_size_ ||
+          holder_velocity_state_interfaces_.size() != wheel_joints_size_)
+      {
+        RCLCPP_WARN(node->get_logger(),
+                    "Controller state publishing enabled but not all state interfaces available. "
+                    "Disabling controller state publishing.");
+        publish_wheel_joint_controller_state_ = false;
+      }
     }
 
     // Initialize odometry
@@ -491,9 +520,17 @@ namespace swerve_steering_controller
 
     if (radii.size() != wheel_joints_size_ ||
         limitless.size() != wheel_joints_size_ ||
-        offsets.size() != wheel_joints_size_)
+        offsets.size() != wheel_joints_size_ ||
+        positions_param.size() != wheel_joints_size_ * 2 ||
+        limits_param.size() != wheel_joints_size_ * 2)
     {
-      RCLCPP_ERROR(node->get_logger(), "Parameter array sizes don't match number of wheels");
+      RCLCPP_ERROR(node->get_logger(), "Parameter array sizes don't match number of wheels. "
+                   "Expected: radii=%zu, positions=%zu, limitless=%zu, offsets=%zu, limits=%zu. "
+                   "Got: radii=%zu, positions=%zu, limitless=%zu, offsets=%zu, limits=%zu",
+                   wheel_joints_size_, wheel_joints_size_ * 2, wheel_joints_size_,
+                   wheel_joints_size_, wheel_joints_size_ * 2,
+                   radii.size(), positions_param.size(), limitless.size(),
+                   offsets.size(), limits_param.size());
       return false;
     }
 
