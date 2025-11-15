@@ -136,7 +136,7 @@ namespace swerve_steering_controller
     {
       // ROS_INFO_STREAM("inf_all");
       angular=0;
-      for (int i=0; i<wheels_num_; ++i)
+      for (size_t i=0; i<wheels_num_; ++i)
       {
         linear_x_vh += ( wheels_omega[i]*wheels_radii_[i]*cos(holders_theta[i]) ) / wheels_num_;
         linear_y_vh += ( wheels_omega[i]*wheels_radii_[i]*sin(holders_theta[i]) ) / wheels_num_;
@@ -167,7 +167,7 @@ namespace swerve_steering_controller
       // ROS_INFO_STREAM("average intersection: "<<average_intersection[0]<<" "<<average_intersection[1]);
       intersection_point->at(0) = average_intersection[0]; //just to visualize it on rqt_plot through the publisher
       intersection_point->at(1) = average_intersection[1]; //just to visualize it on rqt_plot through the publisher
-      for (int i=0; i<wheels_num_; ++i)
+      for (size_t i=0; i<wheels_num_; ++i)
       {
         //ignore the wheel if the intersection is on its center of rotation
         if (utils::isclose(average_intersection[0],wheels_positions_[i][0])&&utils::isclose(average_intersection[1],wheels_positions_[i][1]))
@@ -175,7 +175,7 @@ namespace swerve_steering_controller
           continue;
         }
         auto icr_wh = std::array<double,2>{wheels_positions_[i][0]-average_intersection[0] , wheels_positions_[i][1]-average_intersection[1]};
-        if (isinf(icr_wh[0])||isinf(icr_wh[1]))
+        if (std::isinf(icr_wh[0])||std::isinf(icr_wh[1]))
             RCLCPP_WARN(rclcpp::get_logger("swerve_odometry"), "icr_wh is inf");
         if (utils::isclose(icr_wh[0],0)||utils::isclose(icr_wh[1],0))
             RCLCPP_WARN(rclcpp::get_logger("swerve_odometry"), "icr_wh for wheel %d is zero. icr is just over it!", static_cast<int>(i));
@@ -188,7 +188,7 @@ namespace swerve_steering_controller
       linear_y_vh = -1 * average_intersection[0] * angular;
     }
 
-    if(isnan(linear_x_vh)||isnan(linear_y_vh)||isnan(angular))
+    if(std::isnan(linear_x_vh)||std::isnan(linear_y_vh)||std::isnan(angular))
     {
       RCLCPP_ERROR(rclcpp::get_logger("swerve_odometry"), "estimated vx,vy or wz is nan");
       for (const auto& it: holders_theta)
@@ -207,7 +207,7 @@ namespace swerve_steering_controller
       RCLCPP_INFO(rclcpp::get_logger("swerve_odometry"), "linearx %f lineary %f angular %f", linear_x_vh, linear_y_vh, angular);
       return false;
     }
-    if(isinf(linear_x_vh)||isinf(linear_y_vh)||isinf(angular))
+    if(std::isinf(linear_x_vh)||std::isinf(linear_y_vh)||std::isinf(angular))
     {
       RCLCPP_ERROR(rclcpp::get_logger("swerve_odometry"), "estimated vx,vy or wz is inf");
       for (const auto& it: holders_theta)
@@ -233,7 +233,7 @@ namespace swerve_steering_controller
     linear_y = linear_x_vh * sin(heading_) + linear_y_vh * cos(heading_);
 
     /// We cannot estimate the speed with very small time intervals:
-    const double dt = (time - timestamp_).toSec();
+    const double dt = (time - timestamp_).seconds();
     if (dt < 0.0001)
       return false; // Interval too small to integrate with
 
@@ -291,6 +291,7 @@ namespace swerve_steering_controller
       const double heading_old = heading_;
       const double rx = linear_x/angular;
       const double ry = linear_y/angular;
+      (void)ry;  // Unused variable - potentially a bug in original code
       heading_ += angular;
       x_       +=  rx * (sin(heading_) - sin(heading_old));
       y_       += -rx * (cos(heading_) - cos(heading_old));
