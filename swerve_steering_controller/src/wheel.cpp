@@ -39,7 +39,7 @@
 #include <swerve_steering_controller/wheel.h>
 
 wheel::wheel(const double radius, const std::array<double,2>& position, bool limitless, const std::array<double,2>& rotation_limits)
-:radius{radius}, limitless_{limitless}, limits_{interval(rotation_limits,"close").complement()} 
+:limitless_{limitless}, limits_{interval(rotation_limits,"close").complement()}, radius{radius}
 {
     this -> position = std::move(position);
 }
