@@ -390,10 +390,17 @@ namespace swerve_steering_controller
       holders_theta.push_back(holder_pos);
       wheels_[i].set_current_angle(holder_pos);
       directions.push_back(wheels_[i].get_omega_direction());
+
+      RCLCPP_DEBUG_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
+        "Wheel %zu: holder_joint=%s, state_pos=%.6f, wheel_current_angle=%.6f, omega_dir=%d",
+        i, holder_joint_names_[i].c_str(), holder_pos, wheels_[i].get_current_angle(), wheels_[i].get_omega_direction());
     }
 
     // Update odometry
     std::array<double,2> intersection_point = {0, 0};
+    RCLCPP_DEBUG_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
+      "Calling odometry.update with holders_theta=[%.6f, %.6f], wheels_omega=[%.6f, %.6f], directions=[%d, %d]",
+      holders_theta[0], holders_theta[1], wheels_omega[0], wheels_omega[1], directions[0], directions[1]);
     odometry_.update(wheels_omega, holders_theta, directions, time, &intersection_point);
 
     // Publish intersection point
@@ -449,6 +456,9 @@ namespace swerve_steering_controller
     limiter_lin_y_.limit(current_cmd.y, last0_cmd_.y, last1_cmd_.y, cmd_dt);
     limiter_ang_.limit(current_cmd.w, last0_cmd_.w, last1_cmd_.w, cmd_dt);
 
+    RCLCPP_DEBUG_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
+      "Cmd_vel: x=%.3f y=%.3f w=%.3f", current_cmd.x, current_cmd.y, current_cmd.w);
+
     last1_cmd_ = last0_cmd_;
     last0_cmd_ = current_cmd;
 
@@ -467,13 +477,18 @@ namespace swerve_steering_controller
       double w_th = atan2(wheel_vy, wheel_vx);
 
       // Process command through wheel class
-      wheels_[i].set_current_angle(holder_position_state_interfaces_[i].get().get_optional().value());
+      double current_holder_pos = holder_position_state_interfaces_[i].get().get_optional().value();
+      wheels_[i].set_current_angle(current_holder_pos);
       wheels_[i].set_command_velocity(w_w);
       wheels_[i].set_command_angle(w_th);
 
       // Get actual commands to apply
       double w_applied = wheels_[i].get_command_velocity();
       double th_applied = wheels_[i].get_command_angle();
+
+      RCLCPP_DEBUG_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
+        "Wheel %zu cmd: vx=%.3f vy=%.3f -> raw_angle=%.6f raw_vel=%.3f | current_pos=%.6f -> applied_angle=%.6f applied_vel=%.3f omega_dir=%d",
+        i, wheel_vx, wheel_vy, w_th, w_w, current_holder_pos, th_applied, w_applied, wheels_[i].get_omega_direction());
 
       if (publish_wheel_joint_controller_state_)
       {
