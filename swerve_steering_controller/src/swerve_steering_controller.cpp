@@ -498,10 +498,7 @@ namespace swerve_steering_controller
 
     // Compute wheel velocities and steering angles
     std::vector<double> desired_velocities, desired_positions;
-    std::vector<double> raw_angles, raw_velocities;
-    std::vector<double> optimized_angles, optimized_velocities;
 
-    // First pass: calculate raw and optimized commands for all wheels
     for (size_t i = 0; i < wheel_joints_size_; ++i)
     {
       double wheel_vx = current_cmd.x - current_cmd.w * wheels_[i].position[1] -
@@ -526,75 +523,19 @@ namespace swerve_steering_controller
         w_th = atan2(wheel_vy, wheel_vx);
       }
 
-      raw_angles.push_back(w_th);
-      raw_velocities.push_back(w_w);
-
-      // Process command through wheel class for optimization
+      // Process command through wheel class
       double current_holder_pos = holder_position_state_interfaces_[i].get().get_optional().value();
       wheels_[i].set_current_angle(current_holder_pos);
       wheels_[i].set_command_velocity(w_w);
       wheels_[i].set_command_angle(w_th);
 
-      optimized_angles.push_back(wheels_[i].get_command_angle());
-      optimized_velocities.push_back(wheels_[i].get_command_velocity());
-    }
-
-    // Check if optimization created parallel wheels (all pointing same direction)
-    // For 2+ wheels, if all optimized angles are within tolerance, use raw angles instead
-    bool all_parallel = true;
-    const double angle_tolerance = 0.1;  // ~5.7 degrees
-    if (wheel_joints_size_ >= 2)
-    {
-      double first_angle = optimized_angles[0];
-      for (size_t i = 1; i < wheel_joints_size_; ++i)
-      {
-        double angle_diff = std::abs(optimized_angles[i] - first_angle);
-        // Handle wrap-around: difference near 2π means angles are close
-        if (angle_diff > M_PI) angle_diff = 2*M_PI - angle_diff;
-
-        if (angle_diff > angle_tolerance)
-        {
-          all_parallel = false;
-          break;
-        }
-      }
-    }
-    else
-    {
-      all_parallel = false;  // Single wheel can't be parallel to itself
-    }
-
-    if (all_parallel && wheel_joints_size_ >= 2)
-    {
-      RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
-        "Wheel optimization created parallel configuration - using raw angles to preserve geometry");
-    }
-
-    // Second pass: apply commands
-    for (size_t i = 0; i < wheel_joints_size_; ++i)
-    {
-      double th_applied, w_applied;
-
-      if (all_parallel)
-      {
-        // Use raw angles to avoid parallel configuration
-        th_applied = raw_angles[i];
-        w_applied = raw_velocities[i];
-        // Update wheel objects with raw values
-        wheels_[i].set_command_angle(th_applied);
-        wheels_[i].set_command_velocity(w_applied);
-      }
-      else
-      {
-        // Use optimized values
-        th_applied = optimized_angles[i];
-        w_applied = optimized_velocities[i];
-      }
+      // Get actual commands to apply
+      double w_applied = wheels_[i].get_command_velocity();
+      double th_applied = wheels_[i].get_command_angle();
 
       RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
-        "Wheel %zu: raw_angle=%.6f raw_vel=%.3f -> applied_angle=%.6f applied_vel=%.3f omega_dir=%d%s",
-        i, raw_angles[i], raw_velocities[i], th_applied, w_applied, wheels_[i].get_omega_direction(),
-        all_parallel ? " [RAW]" : " [OPT]");
+        "Wheel %zu cmd: vx=%.3f vy=%.3f -> raw_angle=%.6f raw_vel=%.3f | current_pos=%.6f -> applied_angle=%.6f applied_vel=%.3f omega_dir=%d",
+        i, wheel_vx, wheel_vy, w_th, w_w, current_holder_pos, th_applied, w_applied, wheels_[i].get_omega_direction());
 
       if (publish_wheel_joint_controller_state_)
       {
