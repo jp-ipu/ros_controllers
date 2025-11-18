@@ -308,8 +308,6 @@ namespace swerve_steering_controller
         return controller_interface::CallbackReturn::ERROR;
       }
       wheel_velocity_state_interfaces_.emplace_back(*it);
-      RCLCPP_INFO(node->get_logger(), "Assigned wheel[%zu] velocity state: %s/%s",
-                  i, it->get_prefix_name().c_str(), it->get_interface_name().c_str());
 
       // Holder position state is REQUIRED for odometry and control
       it = std::find_if(
@@ -325,8 +323,6 @@ namespace swerve_steering_controller
         return controller_interface::CallbackReturn::ERROR;
       }
       holder_position_state_interfaces_.emplace_back(*it);
-      RCLCPP_INFO(node->get_logger(), "Assigned holder[%zu] position state: %s/%s",
-                  i, it->get_prefix_name().c_str(), it->get_interface_name().c_str());
 
       // Wheel position state is OPTIONAL (only needed for controller state publishing)
       it = std::find_if(
@@ -402,39 +398,10 @@ namespace swerve_steering_controller
       holders_theta.push_back(holder_pos);
       wheels_[i].set_current_angle(holder_pos);
       directions.push_back(wheels_[i].get_omega_direction());
-
-      RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
-        "Wheel %zu: holder_joint=%s, state_pos=%.6f, wheel_current_angle=%.6f, omega_dir=%d",
-        i, holder_joint_names_[i].c_str(), holder_pos, wheels_[i].get_current_angle(), wheels_[i].get_omega_direction());
-    }
-
-    // Check if we're about to have mismatched angles - log all wheels WITHOUT throttle
-    if (wheel_joints_size_ == 2 && holders_theta.size() == 2 && std::abs(holders_theta[0] - holders_theta[1]) > 2.0)
-    {
-      for (size_t i = 0; i < wheel_joints_size_; ++i)
-      {
-        RCLCPP_ERROR(node->get_logger(),
-          "MISMATCH Wheel %zu: holder_joint=%s, state_pos=%.6f, holders_theta[%zu]=%.6f, omega_dir=%d",
-          i, holder_joint_names_[i].c_str(),
-          holder_position_state_interfaces_[i].get().get_optional().value(),
-          i, holders_theta[i], directions[i]);
-      }
     }
 
     // Update odometry
     std::array<double,2> intersection_point = {0, 0};
-
-    // Check for suspicious theta mismatch (like 0 and π)
-    if (wheel_joints_size_ == 2 && std::abs(holders_theta[0] - holders_theta[1]) > 2.0)
-    {
-      RCLCPP_ERROR(node->get_logger(),
-        "SUSPICIOUS: Large theta difference detected! holders_theta=[%.6f, %.6f], wheels_omega=[%.6f, %.6f], directions=[%d, %d]",
-        holders_theta[0], holders_theta[1], wheels_omega[0], wheels_omega[1], directions[0], directions[1]);
-    }
-
-    RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
-      "Calling odometry.update with holders_theta=[%.6f, %.6f], wheels_omega=[%.6f, %.6f], directions=[%d, %d]",
-      holders_theta[0], holders_theta[1], wheels_omega[0], wheels_omega[1], directions[0], directions[1]);
     odometry_.update(wheels_omega, holders_theta, directions, time, &intersection_point);
 
     // Publish intersection point
@@ -490,9 +457,6 @@ namespace swerve_steering_controller
     limiter_lin_y_.limit(current_cmd.y, last0_cmd_.y, last1_cmd_.y, cmd_dt);
     limiter_ang_.limit(current_cmd.w, last0_cmd_.w, last1_cmd_.w, cmd_dt);
 
-    RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
-      "Cmd_vel: x=%.3f y=%.3f w=%.3f", current_cmd.x, current_cmd.y, current_cmd.w);
-
     last1_cmd_ = last0_cmd_;
     last0_cmd_ = current_cmd;
 
@@ -532,10 +496,6 @@ namespace swerve_steering_controller
       // Get actual commands to apply
       double w_applied = wheels_[i].get_command_velocity();
       double th_applied = wheels_[i].get_command_angle();
-
-      RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
-        "Wheel %zu cmd: vx=%.3f vy=%.3f -> raw_angle=%.6f raw_vel=%.3f | current_pos=%.6f -> applied_angle=%.6f applied_vel=%.3f omega_dir=%d",
-        i, wheel_vx, wheel_vy, w_th, w_w, current_holder_pos, th_applied, w_applied, wheels_[i].get_omega_direction());
 
       if (publish_wheel_joint_controller_state_)
       {
