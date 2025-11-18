@@ -508,7 +508,20 @@ namespace swerve_steering_controller
 
       // Calculate required wheel speed and steering angle
       double w_w = sqrt(pow(wheel_vx, 2) + pow(wheel_vy, 2)) / wheels_[i].radius;
-      double w_th = atan2(wheel_vy, wheel_vx);
+      double w_th;
+
+      // Handle near-zero velocities to avoid atan2 ambiguity with negative zero
+      // When velocity is essentially zero, maintain current steering angle
+      const double vel_threshold = 1e-6;  // ~0.000075 m/s at wheel
+      if (w_w < vel_threshold)
+      {
+        w_th = holder_position_state_interfaces_[i].get().get_optional().value();
+        w_w = 0.0;  // Ensure exactly zero, not -0.0
+      }
+      else
+      {
+        w_th = atan2(wheel_vy, wheel_vx);
+      }
 
       // Process command through wheel class
       double current_holder_pos = holder_position_state_interfaces_[i].get().get_optional().value();
