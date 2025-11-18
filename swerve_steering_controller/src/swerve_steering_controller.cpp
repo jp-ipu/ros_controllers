@@ -241,6 +241,14 @@ namespace swerve_steering_controller
   {
     auto node = get_node();
 
+    // Log all available state interfaces for debugging
+    RCLCPP_INFO(node->get_logger(), "Available state interfaces (%zu total):", state_interfaces_.size());
+    for (const auto & interface : state_interfaces_)
+    {
+      RCLCPP_INFO(node->get_logger(), "  - %s/%s",
+                  interface.get_prefix_name().c_str(), interface.get_interface_name().c_str());
+    }
+
     // Claim command interfaces
     wheel_velocity_command_interfaces_.reserve(wheel_joints_size_);
     holder_position_command_interfaces_.reserve(wheel_joints_size_);
@@ -300,6 +308,8 @@ namespace swerve_steering_controller
         return controller_interface::CallbackReturn::ERROR;
       }
       wheel_velocity_state_interfaces_.emplace_back(*it);
+      RCLCPP_INFO(node->get_logger(), "Assigned wheel[%zu] velocity state: %s/%s",
+                  i, it->get_prefix_name().c_str(), it->get_interface_name().c_str());
 
       // Holder position state is REQUIRED for odometry and control
       it = std::find_if(
@@ -315,6 +325,8 @@ namespace swerve_steering_controller
         return controller_interface::CallbackReturn::ERROR;
       }
       holder_position_state_interfaces_.emplace_back(*it);
+      RCLCPP_INFO(node->get_logger(), "Assigned holder[%zu] position state: %s/%s",
+                  i, it->get_prefix_name().c_str(), it->get_interface_name().c_str());
 
       // Wheel position state is OPTIONAL (only needed for controller state publishing)
       it = std::find_if(
