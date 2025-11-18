@@ -408,8 +408,30 @@ namespace swerve_steering_controller
         i, holder_joint_names_[i].c_str(), holder_pos, wheels_[i].get_current_angle(), wheels_[i].get_omega_direction());
     }
 
+    // Check if we're about to have mismatched angles - log all wheels WITHOUT throttle
+    if (wheel_joints_size_ == 2 && holders_theta.size() == 2 && std::abs(holders_theta[0] - holders_theta[1]) > 2.0)
+    {
+      for (size_t i = 0; i < wheel_joints_size_; ++i)
+      {
+        RCLCPP_ERROR(node->get_logger(),
+          "MISMATCH Wheel %zu: holder_joint=%s, state_pos=%.6f, holders_theta[%zu]=%.6f, omega_dir=%d",
+          i, holder_joint_names_[i].c_str(),
+          holder_position_state_interfaces_[i].get().get_optional().value(),
+          i, holders_theta[i], directions[i]);
+      }
+    }
+
     // Update odometry
     std::array<double,2> intersection_point = {0, 0};
+
+    // Check for suspicious theta mismatch (like 0 and π)
+    if (wheel_joints_size_ == 2 && std::abs(holders_theta[0] - holders_theta[1]) > 2.0)
+    {
+      RCLCPP_ERROR(node->get_logger(),
+        "SUSPICIOUS: Large theta difference detected! holders_theta=[%.6f, %.6f], wheels_omega=[%.6f, %.6f], directions=[%d, %d]",
+        holders_theta[0], holders_theta[1], wheels_omega[0], wheels_omega[1], directions[0], directions[1]);
+    }
+
     RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 1000,
       "Calling odometry.update with holders_theta=[%.6f, %.6f], wheels_omega=[%.6f, %.6f], directions=[%d, %d]",
       holders_theta[0], holders_theta[1], wheels_omega[0], wheels_omega[1], directions[0], directions[1]);
